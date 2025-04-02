@@ -9,13 +9,16 @@ from torch.optim import lr_scheduler
 from utils import *
 from modules import *
 
+startime = time.time()
+print("DELETE map_location=torch.device('cpu')  IF RUNNING ON GPU!!")
+
 parser = argparse.ArgumentParser(
-    'Neural relational inference for molecular dynamics simulations')
+    'Neral relational inference for molecular dynamics simulations')
 parser.add_argument('--num-residues', type=int, default=388,
                     help='Number of residues of the PDB.')
 parser.add_argument('--save-folder', type=str, default='logs',
                     help='Where to save the trained model, leave empty to not save anything.')
-parser.add_argument('--load-folder', type=str, default='',
+parser.add_argument('--load-folder', type=str, default='logs', ########changed this from above save-folder!!
                     help='Where to load the trained model if finetunning. ' +
                          'Leave empty to train from scratch')
 parser.add_argument('--edge-types', type=int, default=4,
@@ -29,7 +32,7 @@ parser.add_argument('--prediction-steps', type=int, default=1, metavar='N',
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='Disables CUDA training.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=1000,
+parser.add_argument('--epochs', type=int, default=10,
                     help='Number of epochs to train.')
 parser.add_argument('--batch-size', type=int, default=1,
                     help='Number of samples per batch.')
@@ -147,9 +150,9 @@ elif args.decoder == 'sim':
 
 if args.load_folder:
     encoder_file = os.path.join(args.load_folder, 'encoder.pt')
-    encoder.load_state_dict(torch.load(encoder_file))
+    encoder.load_state_dict(torch.load(encoder_file, map_location=torch.device('cpu') ))
     decoder_file = os.path.join(args.load_folder, 'decoder.pt')
-    decoder.load_state_dict(torch.load(decoder_file))
+    decoder.load_state_dict(torch.load(decoder_file, map_location=torch.device('cpu') ))
 
     args.save_folder = False
 
@@ -186,126 +189,6 @@ rel_rec = Variable(rel_rec)
 rel_send = Variable(rel_send)
 
 
-def train(epoch, best_val_loss):
-    t = time.time()
-    nll_train = []
-    acc_train = []
-    kl_train = []
-    mse_train = []
-    edges_train = []
-    probs_train = []
-
-    encoder.train()
-    decoder.train()
-
-    for batch_idx, (data, relations) in enumerate(train_loader):
-
-        if args.cuda:
-            data, relations = data.cuda(), relations.cuda()
-        data, relations = Variable(data), Variable(relations)
-
-        optimizer.zero_grad()
-
-        logits = encoder(data, rel_rec, rel_send)
-        edges = gumbel_softmax(logits, tau=args.temp, hard=args.hard)
-        prob = my_softmax(logits, -1)
-
-        if args.decoder == 'rnn':
-            output = decoder(data, edges, rel_rec, rel_send, 50,
-                             burn_in=True,
-                             burn_in_steps=args.timesteps - args.prediction_steps)
-        else:
-            output = decoder(data, edges, rel_rec, rel_send,
-                             args.prediction_steps)
-
-        target = data[:, :, 1:, :]
-
-        loss_nll = nll_gaussian(output, target, args.var)
-
-        if args.prior:
-            loss_kl = kl_categorical(prob, log_prior, args.num_residues)
-        else:
-            loss_kl = kl_categorical_uniform(prob, args.num_residues,
-                                             args.edge_types)
-
-        loss = loss_nll + loss_kl
-
-        acc = edge_accuracy(logits, relations)
-        acc_train.append(acc)
-
-        loss.backward()
-        optimizer.step()
-
-        mse_train.append(F.mse_loss(output, target).item())
-        nll_train.append(loss_nll.item())
-        kl_train.append(loss_kl.item())
-        _, edges_t = edges.max(-1)
-        edges_train.append(edges_t.data.cpu().numpy())
-        probs_train.append(prob.data.cpu().numpy())
-
-    scheduler.step()
-    nll_val = []
-    acc_val = []
-    kl_val = []
-    mse_val = []
-
-    encoder.eval()
-    decoder.eval()
-    for batch_idx, (data, relations) in enumerate(valid_loader):
-        if args.cuda:
-            data, relations = data.cuda(), relations.cuda()
-        with torch.no_grad():
-
-            logits = encoder(data, rel_rec, rel_send)
-            edges = gumbel_softmax(logits, tau=args.temp, hard=True)
-            prob = my_softmax(logits, -1)
-
-            # validation output uses teacher forcing
-            output = decoder(data, edges, rel_rec, rel_send, 1)
-
-            target = data[:, :, 1:, :]
-            loss_nll = nll_gaussian(output, target, args.var)
-            loss_kl = kl_categorical_uniform(
-                prob, args.num_residues, args.edge_types)
-
-        acc = edge_accuracy(logits, relations)
-        acc_val.append(acc)
-
-        mse_val.append(F.mse_loss(output, target).item())
-        nll_val.append(loss_nll.item())
-        kl_val.append(loss_kl.item())
-
-    print('Epoch: {:04d}'.format(epoch),
-          'nll_train: {:.10f}'.format(np.mean(np.array(nll_train))),
-          'kl_train: {:.10f}'.format(np.mean(np.array(kl_train))),
-          'mse_train: {:.10f}'.format(np.mean(np.array(mse_train))),
-          'acc_train: {:.10f}'.format(np.mean(np.array(acc_train))),
-          'nll_val: {:.10f}'.format(np.mean(np.array(nll_val))),
-          'kl_val: {:.10f}'.format(np.mean(np.array(kl_val))),
-          'mse_val: {:.10f}'.format(np.mean(np.array(mse_val))),
-          'acc_val: {:.10f}'.format(np.mean(np.array(acc_val))),
-          'time: {:.4f}s'.format(time.time() - t))
-    edges_train = np.concatenate(edges_train)
-    probs_train = np.concatenate(probs_train)
-    if args.save_folder and np.mean(np.array(nll_val)) < best_val_loss:
-        torch.save(encoder.state_dict(), encoder_file)
-        torch.save(decoder.state_dict(), decoder_file)
-        print('Best model so far, saving...')
-        print('Epoch: {:04d}'.format(epoch),
-              'nll_train: {:.10f}'.format(np.mean(np.array(nll_train))),
-              'kl_train: {:.10f}'.format(np.mean(np.array(kl_train))),
-              'mse_train: {:.10f}'.format(np.mean(np.array(mse_train))),
-              'acc_train: {:.10f}'.format(np.mean(np.array(acc_train))),
-              'nll_val: {:.10f}'.format(np.mean(np.array(nll_val))),
-              'kl_val: {:.10f}'.format(np.mean(np.array(kl_val))),
-              'mse_val: {:.10f}'.format(np.mean(np.array(mse_val))),
-              'acc_val: {:.10f}'.format(np.mean(np.array(acc_val))),
-              'time: {:.4f}s'.format(time.time() - t), file=log)
-        log.flush()
-
-    return encoder, decoder, edges_train, probs_train, np.mean(np.array(nll_val))
-
-
 def test():
     acc_test = []
     nll_test = []
@@ -318,9 +201,10 @@ def test():
 
     encoder.eval()
     decoder.eval()
-    encoder.load_state_dict(torch.load(encoder_file))
-    decoder.load_state_dict(torch.load(decoder_file))
+    encoder.load_state_dict(torch.load(encoder_file, map_location=torch.device('cpu')))
+    decoder.load_state_dict(torch.load(decoder_file, map_location=torch.device('cpu')))
 
+    print('loaded all data, will start loop', time.time()-startime)
     for batch_idx, (data, relations) in enumerate(test_loader):
         if args.cuda:
             data, relations = data.cuda(), relations.cuda()
@@ -377,6 +261,8 @@ def test():
             tot_mse += mse.data.cpu().numpy()
             counter += 1
 
+    print('done with loop', time.time()-startime)
+    
     mean_mse = tot_mse / counter
     mse_str = '['
     for mse_step in mean_mse[:-1]:
@@ -409,28 +295,16 @@ def test():
     return edges_test, probs_test
 
 
-# Train model
-print("Start Training...")
-t_total = time.time()
-best_val_loss = np.inf
-best_epoch = 0
-for epoch in range(args.epochs):
-    encoder, decoder, edges_train, probs_train, val_loss = train(
-        epoch, best_val_loss)
-    # print('Epoch '+str(epoch)+' with val loss:'+str(val_loss))
-    if val_loss < best_val_loss:
-        best_val_loss = val_loss
-        best_epoch = epoch
-np.save(str(args.save_folder)+'/out_edges_train.npy', edges_train)
-np.save(str(args.save_folder)+'/out_probs_train.npy', probs_train)
-print("Optimization Finished!")
-print("Best Epoch: {:04d}".format(best_epoch))
-if args.save_folder:
-    print("Best Epoch: {:04d}".format(best_epoch), file=log)
-    log.flush()
 
+print('starting test, ', time.time()-startime)
 # Test
 edges_test, probs_test = test()
+print('done with test! will save', time.time()-startime)
+
+np.save(str(args.load_folder)+'/out_edges_test.npy', edges_test)
+np.save(str(args.load_folder)+'/out_probs_test.npy', probs_test)
+print('done with saving', time.time()-startime)
 if log is not None:
     print(save_folder)
     log.close()
+

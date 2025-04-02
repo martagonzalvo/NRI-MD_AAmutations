@@ -4,23 +4,29 @@ import argparse
 from copy import deepcopy
 from scipy import interpolate
 
+# timestep < number of trajectory snapshots (=MODEL N)
+# timestep = (# snapshots/interval)
+
+
 parser = argparse.ArgumentParser('Preprocessing: Generate training/validation/testing features from pdb')
 parser.add_argument('--MDfolder', type=str, default="data/pdb/",
                     help='folder of pdb MD')
 parser.add_argument('--pdb-start', type=int, default="1",
                     help='select pdb file window from start, e.g. in tutorial it is ca_1.pdb')
-parser.add_argument('--pdb-end', type=int, default="56",
+parser.add_argument('--pdb-end', type=int, default="10",
                     help='select pdb file window to end')
-parser.add_argument('--num-residues', type=int, default=77,
+parser.add_argument('--num-residues', type=int, default=388,
                     help='Number of residues of the MD pdb')
 parser.add_argument('--feature-size', type=int, default=6,
                     help='The number of features used in study( position (X,Y,Z) + velocity (X,Y,Z) ).')
-parser.add_argument('--train-interval', type=int, default=60,
+parser.add_argument('--train-interval', type=int, default=10,
                     help='intervals in trajectory in training')
-parser.add_argument('--validate-interval', type=int, default=60,
+parser.add_argument('--validate-interval', type=int, default=10,
                     help='intervals in trajectory in validate')
-parser.add_argument('--test-interval', type=int, default=100,
+parser.add_argument('--test-interval', type=int, default=10,
                     help='intervals in trajectory in test')
+parser.add_argument('--timesteps', type=int, default=50,
+                    help='batches of windows to analyze at once, every interval')
 args = parser.parse_args()
 
 
@@ -120,7 +126,7 @@ def read_feature_MD_file_slidingwindow(filename, timestep_size, feature_size, nu
             words = line.split()
             if(line.startswith("MODEL")):
                 modelNum = int(words[1])
-                if (modelNum % interval == window_choose):
+                if (modelNum % interval == window_choose):                   
                     flag = True
                 if (modelNum % interval == (window_choose+1)):
                     nflag = True
@@ -142,7 +148,6 @@ def read_feature_MD_file_slidingwindow(filename, timestep_size, feature_size, nu
             elif(line.startswith("ENDMDL") and nflag):
                 nflag = False
     f.close()
-    # print(feature.shape)
     return feature
 
 
@@ -338,10 +343,11 @@ pdb_end = args.pdb_end
 train_interval = args.train_interval
 validate_interval = args.validate_interval
 test_interval = args.test_interval
+timestep_size = args.timesteps
 
 # Generate training/validating/testing
 print("Generate Train")
-features, edges = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=50,
+features, edges = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=timestep_size,
                                             feature_size=feature_size, num_residues=num_residues, interval=train_interval, pdb_start=pdb_start, pdb_end=pdb_end, aa_start=1, aa_end=num_residues)
 
 np.save('data/features.npy', features)
@@ -349,7 +355,7 @@ np.save('data/edges.npy', edges)
 
 
 print("Generate Valid")
-features_valid, edges_valid = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=50,
+features_valid, edges_valid = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=timestep_size,
                                                         feature_size=feature_size, num_residues=num_residues, interval=validate_interval, pdb_start=pdb_start, pdb_end=pdb_end, aa_start=1, aa_end=num_residues)
 
 np.save('data/features_valid.npy', features_valid)
@@ -357,7 +363,7 @@ np.save('data/edges_valid.npy', edges_valid)
 
 
 print("Generate Test")
-features_test, edges_test = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=50,
+features_test, edges_test = convert_dataset_md_single(MDfolder, startIndex=1, experiment_size=1, timestep_size=timestep_size,
                                                       feature_size=feature_size, num_residues=num_residues, interval=test_interval, pdb_start=pdb_start, pdb_end=pdb_end, aa_start=1, aa_end=num_residues)
 np.save('data/features_test.npy', features_test)
 np.save('data/edges_test.npy', edges_test)

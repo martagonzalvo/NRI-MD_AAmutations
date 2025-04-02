@@ -8,17 +8,17 @@ import networkx as nx
 
 parser = argparse.ArgumentParser(
     'Find shortest paths along domains in residues.')
-parser.add_argument('--num-residues', type=int, default=77,
+parser.add_argument('--num-residues', type=int, default=388,
                     help='Number of residues of the PDB.')
-parser.add_argument('--windowsize', type=int, default=56,
+parser.add_argument('--windowsize', type=int, default=10,
                     help='window size')
 parser.add_argument('--dist-threshold', type=int, default=12,
                     help='threshold for shortest distance')
-parser.add_argument('--filename', type=str, default='logs/out_probs_train.npy',
+parser.add_argument('--filename', type=str, default='logs/out_probs_test.npy',
                     help='File name of the probs file.')
-parser.add_argument('--source-node', type=int, default=46,
+parser.add_argument('--source-node', type=int, default=82,
                     help='source residue of the PDB')
-parser.add_argument('--outputfilename', type=str, default='logs/source46.txt',
+parser.add_argument('--outputfilename', type=str, default='logs/source82.txt',
                     help='File of shortest path from source to targets')
 args = parser.parse_args()
 
@@ -113,7 +113,7 @@ MDG = nx.MultiDiGraph()
 MDG.add_edges_from(edges_list)
 
 source_node = args.source_node  # set source node
-target_nodes = [61, 62, 63, 64, 65, 66, 67, 68, 69, 70]  # set target nodes
+target_nodes = [104,105,106,107,108,117,118,119,162,166,182,183,184,185,186,227,228,231,301, 26,30,39]  # set target nodes
 out_file = args.outputfilename
 
 path_dict = dict()

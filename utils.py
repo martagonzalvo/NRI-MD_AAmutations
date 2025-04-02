@@ -576,4 +576,4 @@ def edge_accuracy(preds, target):
     _, preds = preds.max(-1)
     correct = preds.float().data.eq(
         target.float().data.view_as(preds)).cpu().sum()
-    return np.float(correct) / (target.size(0) * target.size(1))
+    return float(correct) / (target.size(0) * target.size(1))
